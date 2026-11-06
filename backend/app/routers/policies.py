@@ -28,14 +28,14 @@ from ..schemas import (
 )
 from ..security import enroll_limiter, parse_limiter, require_operator
 from ..serializers import member_public, policy_public
-from ..services import audit, receipts, screening
-from ..services.policy_parser import enforce_bounds, parse_policy_text
+from ..services import ai, audit, receipts, screening
+from ..services.policy_parser import enforce_bounds
 
 router = APIRouter(tags=["policies"])
 
 
 @router.post("/policies/parse", response_model=PolicyParseResponse)
-def parse_policy(
+async def parse_policy(
     payload: PolicyParseRequest,
     db: Session = Depends(get_db),
     _: None = Depends(parse_limiter),
@@ -43,16 +43,17 @@ def parse_policy(
     if payload.zone not in ZONES:
         raise HTTPException(status_code=400, detail=f"Unknown zone '{payload.zone}'")
 
-    outcome = parse_policy_text(payload.text, zone=payload.zone)
-    if not outcome.ok or outcome.policy is None:
-        return PolicyParseResponse(ok=False, error=outcome.error, attempts=outcome.attempts)
+    # AI (when configured) proposes; enforce_bounds() has the final say.
+    result = await ai.parse_policy(payload.text, payload.zone)
+    if not result.ok or result.policy is None:
+        return PolicyParseResponse(ok=False, error=result.error, attempts=result.attempts)
 
     try:
-        policy = enforce_bounds(outcome.policy, source=outcome.policy.source)
+        policy = enforce_bounds(result.policy, source=result.policy.source)
     except ValueError as exc:
-        return PolicyParseResponse(ok=False, error=str(exc), attempts=outcome.attempts)
+        return PolicyParseResponse(ok=False, error=str(exc), attempts=result.attempts)
 
-    return PolicyParseResponse(ok=True, policy=policy, attempts=outcome.attempts)
+    return PolicyParseResponse(ok=True, policy=policy, attempts=result.attempts)
 
 
 @router.post("/policies", response_model=EnrollResponse, status_code=status.HTTP_201_CREATED)

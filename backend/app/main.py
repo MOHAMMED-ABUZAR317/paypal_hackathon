@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .config import REPO_ROOT, get_settings
 from .db import SessionLocal, create_all
-from .routers import events, ledger, meta, operator, policies, pool, webhooks
+from .routers import ai, events, ledger, meta, operator, policies, pool, webhooks
 from .seed import seed_if_empty
 from .services.paypal import PayPalError
 from .services.scheduler import scheduler_loop
@@ -84,6 +84,7 @@ app.add_middleware(
 
 for router in (
     meta.router,
+    ai.router,
     policies.router,
     pool.router,
     events.router,
