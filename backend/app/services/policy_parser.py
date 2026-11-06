@@ -41,7 +41,11 @@ WORD_NUMBERS = {
     "six": 6,
 }
 
-RAIN_WORDS = ("rain", "rainfall", "monsoon", "precipitation", "storm", "downpour")
+# Word-boundary match, so the product name "RainCheck" is not mistaken for a
+# rainfall trigger. Plurals and "-y" forms still count ("rains", "rainy").
+RAIN_PATTERN = re.compile(
+    r"\b(?:rain(?:s|fall|y)?|monsoon|precipitation|storm(?:s|y)?|downpour)\b"
+)
 OTHER_TRIGGERS = {
     "earthquake": "earthquake",
     "heat wave": "heat wave",
@@ -133,6 +137,10 @@ def extract_monthly_cap(text: str) -> int | None:
     if match:
         raw = match.group(1)
         return int(raw) if raw.isdigit() else WORD_NUMBERS.get(raw)
+    frequency = {"once": 1, "twice": 2, "thrice": 3}
+    for word, value in frequency.items():
+        if re.search(rf"\b{word}\b\s*(?:a|per|each|every)\s*month", lowered):
+            return value
     match = re.search(r"(\d+|one|two|three)\s*(?:storm|rainy)\s*days?", lowered)
     if match:
         raw = match.group(1)
@@ -182,7 +190,7 @@ def parse_policy_text(
             "Instruction-like wording was ignored. Only the policy fields below are used."
         )
 
-    has_rain = any(word in lowered for word in RAIN_WORDS)
+    has_rain = RAIN_PATTERN.search(lowered) is not None
     if not has_rain:
         for marker, label in OTHER_TRIGGERS.items():
             if marker in lowered:
