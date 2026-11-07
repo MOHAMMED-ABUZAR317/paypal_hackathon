@@ -180,3 +180,28 @@ def test_live_poll_is_fail_closed_or_processes(seeded_client):
         assert result["status"] in {"processed", "duplicate", "below_threshold", "feed_error"}
         if result["status"] == "feed_error":
             assert "event_id" not in result
+
+
+def test_demo_reset_removes_rehearsal_members(seeded_client):
+    """Reset returns the demo to its seed baseline, including free emails."""
+    baseline = seeded_client.get("/api/pool/stats").json()
+    baseline_members = baseline["members"]["total"]
+
+    assert enroll(seeded_client, email="rehearsal@example.com").status_code == 201
+    fraud = seeded_client.post(
+        "/api/operator/demo/fraud-attempt", headers=OPERATOR_HEADERS
+    )
+    assert fraud.status_code == 200
+    assert fraud.json()["blocked"] is True
+    assert seeded_client.get("/api/pool/stats").json()["members"]["total"] == baseline_members + 2
+
+    reset = seeded_client.post("/api/operator/demo/reset", headers=OPERATOR_HEADERS)
+    assert reset.status_code == 200
+    assert reset.json()["rehearsal_members_removed"] == 2
+
+    after = seeded_client.get("/api/pool/stats").json()
+    assert after["members"]["total"] == baseline_members
+    assert after["members"]["policies_active"] == baseline["members"]["policies_active"]
+    assert after["pool"]["paused"] is False
+    # The email is free again, so the same rehearsal can run twice.
+    assert enroll(seeded_client, email="rehearsal@example.com").status_code == 201
