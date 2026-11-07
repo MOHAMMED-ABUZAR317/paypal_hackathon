@@ -108,3 +108,38 @@ def test_plain_language_explains_the_rule():
     assert "Hyderabad Central" in text
     assert "Rs 500" in text
     assert "3" in text
+
+
+# ---------------------------------------------------------------------------
+# Waiting period: the rain window must never be mistaken for the cooling-off
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sentence,expected",
+    [
+        (
+            "Heavy rain above 80 mm in 24 hours, pay 1500, up to 5 days a month, "
+            "wait 200 hours.",
+            MAX_WAITING_HOURS,
+        ),
+        ("50 mm rain, pay 500, waiting period of 72 hours.", 72),
+        ("50 mm rain, pay 500, 72 hours waiting period.", 72),
+        ("50 mm rain, pay 500, cover starts in 48 hours.", 48),
+        ("50 mm rain, pay 500, wait 3 days.", 72),
+        ("If rain crosses 50 mm in 24 hours, pay me 500 rupees", 48),
+        ("50 mm rain, pay 500, 2 inches in 24 hours", 48),
+        ("50 mm rain, pay 500", 48),
+    ],
+)
+def test_waiting_period_prefers_the_explicit_clause(sentence, expected):
+    result = parse_policy_text(sentence)
+    assert result.ok is True
+    assert result.policy.waiting_period_hours == expected
+
+
+def test_waiting_period_is_clamped_but_keeps_the_waiting_clause_number():
+    result = parse_policy_text("50 mm rain, pay 500, wait 12 hours")
+    assert result.policy.waiting_period_hours == 24
+    assert any("24" in warning and "168" in warning for warning in result.policy.warnings)
+

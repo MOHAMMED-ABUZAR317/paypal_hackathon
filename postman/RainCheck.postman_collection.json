@@ -1,0 +1,781 @@
+{
+  "info": {
+    "_postman_id": "3f1c2a44-9d7b-4c2e-8f01-2b3c4d5e6f70",
+    "name": "RainCheck — end-to-end QA (mock PayPal)",
+    "description": "Sandbox-only flow: parse a sentence, enroll a worker, fund the pool with a mock PayPal order, simulate a storm, verify idempotency, receipts and the guardrails. Operator requests use the X-Operator-Key header. Never run the guardrail folder against real money.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 · Smoke",
+      "item": [
+        {
+          "name": "Health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('database is ok', () => pm.expect(b.database).to.eql('ok'));",
+                  "pm.test('seeded pool', () => pm.expect(b.seeded).to.eql(true));",
+                  "pm.test('mock transport is explicit', () => pm.expect(b.paypal_mode).to.be.oneOf(['mock', 'sandbox']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            }
+          }
+        },
+        {
+          "name": "Public config",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('six zones', () => pm.expect(b.zones).to.have.lengthOf(6));",
+                  "pm.test('AI cannot move money', () => pm.expect(b.app.ai.enabled).to.be.a('boolean'));",
+                  "pm.test('paypal mode is exposed', () => pm.expect(b.app.paypal.mode).to.be.oneOf(['mock', 'sandbox']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/config",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "config"]
+            }
+          }
+        },
+        {
+          "name": "Zones",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('has hyderabad-central', () => {",
+                  "  const b = pm.response.json();",
+                  "  const zones = b.zones || b;",
+                  "  pm.expect(JSON.stringify(zones)).to.include('hyderabad-central');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/zones",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "zones"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 · Policy and enrollment",
+      "item": [
+        {
+          "name": "Parse a policy sentence",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('parser produced a policy', () => pm.expect(b.ok).to.eql(true));",
+                  "pm.test('threshold is 50 mm', () => pm.expect(b.policy.threshold).to.eql(50));",
+                  "pm.test('payout is Rs 500', () => pm.expect(b.policy.payout_amount_minor).to.eql(50000));",
+                  "pm.test('monthly cap is 3', () => pm.expect(b.policy.max_payouts_per_month).to.eql(3));",
+                  "pm.test('waiting period is bounded', () => pm.expect(b.policy.waiting_period_hours).to.be.within(24, 168));",
+                  "pm.environment.set('parsedPolicy', JSON.stringify(b.policy));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"If 24-hour rainfall in Hyderabad Central reaches 50 mm, pay me Rs 500, up to 3 days a month.\",\n  \"zone\": \"hyderabad-central\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/policies/parse",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "policies", "parse"]
+            }
+          }
+        },
+        {
+          "name": "Enroll a new worker",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test('member is active', () => pm.expect(b.member.status).to.eql('active'));",
+                  "pm.test('policy is active', () => pm.expect(b.policy.active).to.eql(true));",
+                  "pm.test('screening allowed', () => pm.expect(b.screening.recommendation).to.eql('allow'));",
+                  "pm.test('receipt is generated', () => pm.expect(b.receipt).to.be.a('string').and.not.empty);",
+                  "pm.environment.set('memberId', b.member.id);",
+                  "pm.environment.set('policyId', b.policy.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"member\": {\n    \"name\": \"QA Runner\",\n    \"email\": \"qa.runner+{{$timestamp}}@example.com\",\n    \"paypal_email\": \"qa.paypal+{{$timestamp}}@example.com\",\n    \"zone\": \"hyderabad-central\",\n    \"device_id\": \"DEV-QA-{{$timestamp}}\",\n    \"signup_ip\": \"198.51.100.77\",\n    \"verified\": true\n  },\n  \"policy\": {{parsedPolicy}},\n  \"source_text\": \"If 24-hour rainfall in Hyderabad Central reaches 50 mm, pay me Rs 500, up to 3 days a month.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/policies",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "policies"]
+            }
+          }
+        },
+        {
+          "name": "Member detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('same member', () => pm.expect(b.member.id).to.eql(pm.environment.get('memberId')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/members/{{memberId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "members", "{{memberId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 · Funding with PayPal Orders",
+      "item": [
+        {
+          "name": "Create contribution order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('order returned', () => pm.expect(b.order_id).to.be.a('string').and.not.empty);",
+                  "pm.test('mock transport labelled', () => pm.expect(b.mock).to.eql(true));",
+                  "pm.test('created, not captured', () => pm.expect(b.status).to.be.oneOf(['CREATED', 'created']));",
+                  "pm.environment.set('orderId', b.order_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"member_id\": \"{{memberId}}\",\n  \"amount_minor\": 10000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/pool/fund",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "pool", "fund"]
+            }
+          }
+        },
+        {
+          "name": "Capture order and credit the pool",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('captured', () => pm.expect(b.status).to.be.oneOf(['COMPLETED', 'completed']));",
+                  "pm.test('amount is Rs 100', () => pm.expect(b.amount_minor).to.eql(10000));",
+                  "pm.test('no real money', () => pm.expect(b.mock).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pool/fund/{{orderId}}/capture",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "pool", "fund", "{{orderId}}", "capture"]
+            }
+          }
+        },
+        {
+          "name": "Pool split after capture",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('contribution recorded', () => pm.expect(b.performance.contributions_count).to.be.at.least(1));",
+                  "pm.test('boxes are integers in paise', () => {",
+                  "  pm.expect(b.pool.payout_balance_minor).to.be.a('number');",
+                  "  pm.expect(b.pool.reserve_balance_minor).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/pool/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "pool", "stats"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 · Trigger and idempotency",
+      "item": [
+        {
+          "name": "Simulate a 62 mm storm",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('not a replay', () => pm.expect(b.duplicate).to.eql(false));",
+                  "pm.test('some workers approved', () => pm.expect(b.counts.APPROVE).to.be.above(0));",
+                  "pm.test('mock payout batches', () => pm.expect(b.payout_result.mock).to.eql(true));",
+                  "pm.environment.set('eventId', b.event.id);",
+                  "pm.environment.set('eventKey', b.event.event_key);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Operator-Key", "value": "{{operatorKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"zone\": \"hyderabad-central\",\n  \"rainfall_mm\": 62,\n  \"days\": 1,\n  \"event_key\": \"qa:storm:{{$timestamp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events/simulate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "simulate"]
+            }
+          }
+        },
+        {
+          "name": "Replay the same event key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('replay is detected', () => pm.expect(b.duplicate).to.eql(true));",
+                  "pm.test('same event id', () => pm.expect(b.event.id).to.eql(pm.environment.get('eventId')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Operator-Key", "value": "{{operatorKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"zone\": \"hyderabad-central\",\n  \"rainfall_mm\": 62,\n  \"days\": 1,\n  \"event_key\": \"{{eventKey}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events/simulate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "simulate"]
+            }
+          }
+        },
+        {
+          "name": "Event summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('event matches', () => pm.expect(b.event.id).to.eql(pm.environment.get('eventId')));",
+                  "pm.test('decision sample present', () => pm.expect(b.decisions_sample).to.be.an('array').that.is.not.empty);",
+                  "pm.test('every sample has one reason code', () => b.decisions_sample.forEach(d => pm.expect(d.reason_code).to.be.a('string')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "{{eventId}}"]
+            }
+          }
+        },
+        {
+          "name": "Last event key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('key returned for replay', () => pm.expect(b.event_key).to.eql(pm.environment.get('eventKey')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventId}}/last-key",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "{{eventId}}", "last-key"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 · Evidence",
+      "item": [
+        {
+          "name": "Payout ledger for the event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('rows exist', () => pm.expect(b.rows).to.be.an('array').that.is.not.empty);",
+                  "pm.test('every row has a status', () => b.rows.forEach(r => pm.expect(['SUCCESS','PENDING','FAILED']).to.include(r.status)));",
+                  "pm.environment.set('payoutId', b.rows[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ledger?event_id={{eventId}}&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "ledger"],
+              "query": [
+                { "key": "event_id", "value": "{{eventId}}" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Receipt feed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('receipts exist', () => pm.expect(b.receipts).to.be.an('array').that.is.not.empty);",
+                  "pm.test('receipt is deterministic text', () => pm.expect(b.receipts[0].text).to.include('MOCK'));",
+                  "pm.environment.set('receiptId', b.receipts[0].payout_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts?limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "receipts"],
+              "query": [{ "key": "limit", "value": "5" }]
+            }
+          }
+        },
+        {
+          "name": "Receipt by payout id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('same payout', () => pm.expect(b.receipt.payout_id).to.eql(pm.environment.get('receiptId')));",
+                  "pm.test('amount is displayed', () => pm.expect(b.receipt.amount_display).to.match(/Rs|\\u20b9/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/receipts/{{receiptId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "receipts", "{{receiptId}}"]
+            }
+          }
+        },
+        {
+          "name": "Audit trail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('entries exist', () => pm.expect(b.entries).to.be.an('array').that.is.not.empty);",
+                  "pm.test('event.processed is audited', () => pm.expect(JSON.stringify(b.entries)).to.include('event.processed'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/audit?limit=40",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "audit"],
+              "query": [{ "key": "limit", "value": "40" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 · AI guardrails (optional)",
+      "item": [
+        {
+          "name": "AI status cannot move money",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('can_move_money is false', () => pm.expect(b.can_move_money).to.eql(false));",
+                  "pm.test('mode is declared', () => pm.expect(b.mode).to.be.oneOf(['llm', 'rules']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ai/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "ai", "status"]
+            }
+          }
+        },
+        {
+          "name": "Pool insight (fallback-safe)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('source is declared', () => pm.expect(b.source).to.be.oneOf(['llm', 'rules']));",
+                  "pm.test('narrative exists', () => pm.expect(b.ai.summary).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ai/pool-insight",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "ai", "pool-insight"]
+            }
+          }
+        },
+        {
+          "name": "Explain receipt in Hindi",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('numeric guard is reported', () => pm.expect(b.guard).to.be.oneOf(['passed', 'not_required', 'rejected_numeric_mismatch', 'ai_unavailable']));",
+                  "pm.test('source is declared', () => pm.expect(b.source).to.be.oneOf(['llm', 'rules']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ai/receipts/{{receiptId}}/explain?language=hi",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "ai", "receipts", "{{receiptId}}", "explain"],
+              "query": [{ "key": "language", "value": "hi" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 · Guardrails (sandbox only)",
+      "item": [
+        {
+          "name": "Pause all payouts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('pool is paused', () => pm.expect(b.pool.paused).to.eql(true));",
+                  "pm.test('reason is auditable', () => pm.expect(b.pool.pause_reason).to.include('QA'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Operator-Key", "value": "{{operatorKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paused\": true,\n  \"reason\": \"QA: verify the emergency stop\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/operator/pause",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "operator", "pause"]
+            }
+          }
+        },
+        {
+          "name": "Storm while paused is denied",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('nobody approved', () => pm.expect(b.counts.APPROVE).to.eql(0));",
+                  "pm.test('nothing paid', () => pm.expect(b.total_paid_minor).to.eql(0));",
+                  "pm.test('POOL_PAUSED reason present', () => pm.expect(JSON.stringify(b.reasons)).to.include('POOL_PAUSED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Operator-Key", "value": "{{operatorKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"zone\": \"hyderabad-central\",\n  \"rainfall_mm\": 85,\n  \"days\": 1,\n  \"event_key\": \"qa:paused:{{$timestamp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events/simulate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "simulate"]
+            }
+          }
+        },
+        {
+          "name": "Resume payouts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('pool resumed', () => pm.expect(pm.response.json().pool.paused).to.eql(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Operator-Key", "value": "{{operatorKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paused\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/operator/pause",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "operator", "pause"]
+            }
+          }
+        },
+        {
+          "name": "Sybil enrollment is blocked",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('blocked before activation', () => pm.expect(b.blocked).to.eql(true));",
+                  "pm.test('risk score is high', () => pm.expect(b.screening.score).to.be.at.least(80));",
+                  "pm.test('flags explain why', () => pm.expect(b.screening.flags.length).to.be.at.least(2));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-Operator-Key", "value": "{{operatorKey}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/operator/demo/fraud-attempt",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "operator", "demo", "fraud-attempt"]
+            }
+          }
+        },
+        {
+          "name": "Reset the demo to its seed baseline",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('reset succeeded', () => pm.expect(b.reset).to.eql(true));",
+                  "pm.test('rehearsal members removed', () => pm.expect(b.rehearsal_members_removed).to.be.at.least(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-Operator-Key", "value": "{{operatorKey}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/operator/demo/reset",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "operator", "demo", "reset"]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "parsedPolicy", "value": "" },
+    { "key": "memberId", "value": "" },
+    { "key": "policyId", "value": "" },
+    { "key": "eventId", "value": "" },
+    { "key": "eventKey", "value": "" },
+    { "key": "orderId", "value": "" },
+    { "key": "payoutId", "value": "" },
+    { "key": "receiptId", "value": "" }
+  ]
+}
