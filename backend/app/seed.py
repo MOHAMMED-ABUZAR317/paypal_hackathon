@@ -430,7 +430,10 @@ def seed_if_empty(db: Session) -> dict | None:
 def reset_demo(db: Session, *, keep_members: bool = True) -> dict:
     """Clear events/decisions/payouts and restore demo balances.
 
-    Keeps members and policies so the operator can rehearse the demo repeatedly.
+    The 10,000 seeded members and policies are kept so the operator does not
+    have to reseed the pool. Members and policies created during rehearsal
+    (the user-enrollment demo, the sybil attempt) are removed, so the next run
+    of the demo starts from the same baseline and the same emails are free.
     """
     pool = db.query(Pool).order_by(Pool.created_at.asc()).first()
     if pool is None:
@@ -441,6 +444,17 @@ def reset_demo(db: Session, *, keep_members: bool = True) -> dict:
     db.execute(delete(Event))
     db.execute(delete(Contribution))
     db.execute(delete(AuditLog))
+
+    demo_member_ids = [
+        row[0]
+        for row in db.query(Policy.member_id)
+        .filter(Policy.parser_source != "seed")
+        .distinct()
+        .all()
+    ]
+    if demo_member_ids:
+        db.execute(delete(Policy).where(Policy.member_id.in_(demo_member_ids)))
+        db.execute(delete(Member).where(Member.id.in_(demo_member_ids)))
 
     pool.payout_balance_minor = INITIAL_PAYOUT_BALANCE_MINOR
     pool.reserve_balance_minor = INITIAL_RESERVE_MINOR
@@ -465,6 +479,7 @@ def reset_demo(db: Session, *, keep_members: bool = True) -> dict:
         "pool_id": pool.id,
         "reset": True,
         "members_kept": keep_members,
+        "rehearsal_members_removed": len(demo_member_ids),
         "history": history,
     }
 

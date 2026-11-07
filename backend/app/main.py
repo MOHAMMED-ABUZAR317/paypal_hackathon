@@ -12,9 +12,9 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
@@ -114,8 +114,8 @@ async def runtime_error_handler(request: Request, exc: RuntimeError) -> JSONResp
     )
 
 
-@app.get("/", include_in_schema=False)
-def root() -> dict:
+@app.get("/api", include_in_schema=False)
+def api_root() -> dict:
     return {
         "app": "RainCheck",
         "version": __version__,
@@ -126,7 +126,33 @@ def root() -> dict:
 
 
 # Single-service deployment: if the React build exists, serve it from the same
-# origin. API routes are registered first, so they always win.
+# origin. API routes are registered first, so they always win. When the UI is
+# absent (fresh clone / API-only), expose the metadata at "/" instead.
 _DIST = REPO_ROOT / "frontend" / "dist"
 if _DIST.exists():
-    app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="ui")
+    _ASSETS = _DIST / "assets"
+    if _ASSETS.exists():
+        app.mount("/assets", StaticFiles(directory=str(_ASSETS)), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str):
+        """Serve the SPA, including client-side routes such as /operator.
+
+        API routes are registered above and therefore win. Unknown /api paths
+        stay JSON 404s instead of silently returning index.html.
+        """
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = (_DIST / full_path).resolve()
+        if full_path and candidate.is_file() and candidate.is_relative_to(_DIST.resolve()):
+            return FileResponse(candidate)
+        index = _DIST / "index.html"
+        if index.exists():
+            return FileResponse(index)
+        raise HTTPException(status_code=404, detail="UI build not found")
+
+else:
+
+    @app.get("/", include_in_schema=False)
+    def root() -> dict:
+        return api_root()
