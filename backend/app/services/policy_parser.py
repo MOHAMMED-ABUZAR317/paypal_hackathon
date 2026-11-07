@@ -149,10 +149,46 @@ def extract_monthly_cap(text: str) -> int | None:
 
 
 def extract_waiting_hours(text: str) -> int | None:
+    """Extract the cooling-off period, never the rainfall window.
+
+    "80 mm in 24 hours ... wait 200 hours" contains two durations. The first is
+    how the rain is measured; the second is the waiting period. An explicit
+    waiting cue therefore wins, and a bare duration is only used when it is not
+    part of the rain window.
+    """
     lowered = text.lower()
-    match = re.search(r"(\d+)\s*(?:hours?|hrs?)", lowered)
-    if match:
+
+    # Explicit cue before the number: "wait 200 hours", "waiting period of 3 days",
+    # "cover starts in 48 hours", "no payouts for 72 hours".
+    cue = re.search(
+        r"(?:wait(?:ing)?(?:\s*(?:period|time))?|cooling[\s-]*off|"
+        r"no\s+pay(?:out)?s?\s+for|cover\s+(?:starts?|begins?)|"
+        r"eligible\s+(?:only\s+)?after|activated?\s+after)"
+        r"[^0-9]{0,30}?(\d+)\s*(hours?|hrs?|days?)\b",
+        lowered,
+    )
+    if not cue:
+        # Explicit cue after the number: "48 hours waiting period", "72h cooling-off".
+        cue = re.search(
+            r"(\d+)\s*(hours?|hrs?|days?)\s*"
+            r"(?:of\s+)?(?:wait(?:ing)?|cooling[\s-]*off)\b",
+            lowered,
+        )
+    if cue:
+        value = int(cue.group(1))
+        unit = cue.group(2)
+        return value * 24 if unit.startswith("day") else value
+
+    # Fallback: a bare duration that is not the "in 24 hours" rain window.
+    for match in re.finditer(r"(\d+)\s*(?:hours?|hrs?)\b", lowered):
+        prefix = lowered[max(0, match.start() - 12) : match.start()]
+        if re.search(r"(?:in|within|over|[-\u2013])\s*$", prefix):
+            continue
+        suffix = lowered[match.end() : match.end() + 14].lstrip()
+        if suffix.startswith(("rain", "rainfall", "window", "of rain")):
+            continue
         return int(match.group(1))
+
     match = re.search(r"(\d+)\s*days?", lowered)
     if match and "wait" in lowered:
         return int(match.group(1)) * 24
