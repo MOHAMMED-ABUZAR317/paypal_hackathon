@@ -1,0 +1,58 @@
+# Render blueprint for the RainCheck hackathon demo.
+#
+# One Docker web service serves the API and the built React UI. It starts in
+# mock PayPal mode with the live poller off, so a judge can click every flow
+# without anybody's real money moving.
+#
+# Create it with: Render Dashboard -> New -> Blueprint -> pick this repository.
+# Render prompts for every `sync: false` value. Leave optional values blank:
+#   * OPERATOR_API_KEY  - choose a private key; you will paste it into /operator
+#   * PAYPAL_*          - only needed for real sandbox calls
+#   * AI_API_KEY        - optional; blank = deterministic fallback
+#
+# The free plan has ephemeral storage. A redeploy/cold restart reseeds the
+# 10,000-member demo. Point DATABASE_URL at Postgres for persistence.
+
+services:
+  - type: web
+    name: raincheck
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    numInstances: 1
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: ENV
+        value: production
+      - key: AUTO_SEED
+        value: "true"
+      - key: SEED_MEMBERS
+        value: "10000"
+      - key: PAYPAL_MODE
+        value: mock
+      - key: PAYPAL_API_BASE
+        value: https://api-m.sandbox.paypal.com
+      - key: PAYPAL_PAYOUT_CURRENCY
+        value: USD
+      - key: PAYOUT_INR_PER_USD
+        value: "83.00"
+      - key: POLL_INTERVAL_MINUTES
+        value: "0"
+      - key: OPERATOR_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: PAYPAL_SENDER_EMAIL
+        sync: false
+      - key: AI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: AI_MODEL
+        value: gpt-4o-mini
+      - key: AI_API_KEY
+        sync: false
