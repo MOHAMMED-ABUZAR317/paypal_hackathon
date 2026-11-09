@@ -57,6 +57,20 @@ worker's sentence                AI (optional)               deterministic core
 
 ---
 
+## Sponsor Tools
+
+This project actively uses the following sponsor tools:
+
+| Tool | How It's Used |
+| --- | --- |
+| **AG Grid** | Powers the payout ledger dashboard on Dashboard and Operator console. Features include: filtering, sorting, status-colored rows, responsive layout (1440×900 → 390×844), sticky header, tabular numerals for money, and mobile card list fallback. Custom theming via CSS custom properties (`--rain`, `--ink`, `--teal`). |
+| **Postman** | Drives the QA harness: 25-request Newman collection with 84 assertions covering the full path (parse → enrol → fund → simulate → decide → pay → receipt → audit). Also used for testing error cases (duplicate captures, webhook signature rejection, pool insolvency). |
+| **Render** | Deploys the single Docker image (Node builds UI, Python serves API + static build). Free plan with `sync: false` environment variables. Ephemeral storage noted on stage; redeploy/reseeds the 10,000-member demo. |
+
+> **Note:** Other sponsor tools (APIMatic, Bryntum, Elastic, KERNEL, Channel3, Zapier) were evaluated but not integrated to avoid scope creep. The core project demonstrates PayPal integration, parametric rules, and guardrails without requiring additional dependencies.
+
+---
+
 ## Quick Start (Local)
 
 ### Backend
